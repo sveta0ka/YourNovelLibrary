@@ -3,78 +3,140 @@
 <PageTitle>Your Novel Library</PageTitle>
 
 <section class="home-menu">
-    @if (isProjectsOpen)
+    @if (screen == HomeScreen.Projects)
     {
         <ProjectMenu OnBack="ReturnToMenu" />
     }
-    else if (!isLibraryOpen)
+    else if (screen == HomeScreen.Player && currentBook is not null)
+    {
+        <NovelPlayer Book="@currentBook"
+                     OnBack="ReturnToMenu" />
+    }
+    else
     {
         <h1>Your Novel Library</h1>
         <p class="menu-subtitle">Читай истории. Создавай свои.</p>
 
         <div class="menu-actions">
-            <button class="menu-card" @onclick="OpenLibrary">
+            <label class="menu-card file-open-card">
                 <strong>Играть</strong>
-                <span>Выбери историю и начни приключение</span>
-            </button>
+                <span>
+                    @(isOpening
+                        ? "Открываем новеллу…"
+                        : "Выбрать файл .ynl")
+                </span>
 
-            <button class="menu-card" @onclick="OpenProjects">
+                <InputFile @key="fileInputKey"
+                           OnChange="LoadNovel"
+                           disabled="@isOpening"
+                           aria-label="Выбрать новеллу для чтения" />
+            </label>
+
+            <button class="menu-card"
+                    disabled="@isOpening"
+                    @onclick="OpenProjects">
                 <strong>Создать новеллу</strong>
                 <span>Расскажи свою историю</span>
             </button>
-        </div>
-    }
-    else
-    {
-        <h1>Моя библиотека</h1>
-        <p class="menu-subtitle">Пока здесь одна тестовая история.</p>
 
-        <div class="menu-actions">
-            <button class="menu-card" @onclick="OpenNovel">
-                <strong>История Алины</strong>
-                <span>Открыть тестовую новеллу</span>
-            </button>
-
-            @if (isNovelOpen)
+            @if (openError is not null)
             {
-                <p class="novel-preview">
-                    Алина открыла книгу. На первой странице
-                    было написано её имя.
+                <p class="project-file-message" role="alert">
+                    @openError
                 </p>
             }
-
-            <button class="menu-back" @onclick="ReturnToMenu">
-                Вернуться в меню
-            </button>
         </div>
     }
 </section>
 
 @code {
-    private bool isLibraryOpen;
-    private bool isNovelOpen;
+    private HomeScreen screen = HomeScreen.Menu;
+    private LibraryNovel? currentBook;
 
-    private void OpenLibrary()
-    {
-        isLibraryOpen = true;
-    }
-
-    private void OpenNovel()
-    {
-        isNovelOpen = true;
-    }
-
-    private bool isProjectsOpen;
+    private bool isOpening;
+    private string? openError;
+    private int fileInputKey;
 
     private void OpenProjects()
     {
-        isProjectsOpen = true;
+        screen = HomeScreen.Projects;
     }
 
     private void ReturnToMenu()
     {
-        isProjectsOpen = false;
-        isLibraryOpen = false;
-        isNovelOpen = false;
+        currentBook = null;
+        openError = null;
+        screen = HomeScreen.Menu;
+    }
+
+    private async Task LoadNovel(InputFileChangeEventArgs args)
+    {
+        if (isOpening)
+        {
+            return;
+        }
+
+        isOpening = true;
+        openError = null;
+
+        try
+        {
+            var file = args.File;
+
+            if (file.Size > ProjectArchive.MaxFileSize)
+            {
+                openError = "Файл превышает лимит в 50 МБ.";
+                return;
+            }
+
+            await using var input =
+                file.OpenReadStream(ProjectArchive.MaxFileSize);
+
+            var project = await ProjectArchive.ReadAsync(input);
+            var progress = project.ReadingProgress;
+
+            currentBook = new LibraryNovel
+            {
+                Project = project,
+                SceneIndex = progress?.SceneIndex ?? 0,
+                IsFinished = progress?.IsFinished ?? false,
+                HasStarted = true
+            };
+
+            screen = HomeScreen.Player;
+        }
+        catch (InvalidDataException)
+        {
+            openError =
+                "Не удалось открыть новеллу. Проверь формат и содержимое архива.";
+        }
+        catch (JsonException)
+        {
+            openError = "Описание новеллы повреждено.";
+        }
+        catch (NotSupportedException)
+        {
+            openError = "Этот способ упаковки архива пока не поддерживается.";
+        }
+        catch (IOException)
+        {
+            openError = "Не удалось прочитать файл.";
+        }
+        catch (JSException)
+        {
+            openError = "Браузер не смог открыть файл. Попробуй ещё раз.";
+        }
+        finally
+        {
+            isOpening = false;
+            fileInputKey++;
+        }
+    }
+
+    private enum HomeScreen
+    {
+        Menu,
+        Player,
+        Projects
     }
 }

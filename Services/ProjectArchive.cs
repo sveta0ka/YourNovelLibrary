@@ -226,6 +226,18 @@ public static class ProjectArchive
                 "Некорректная коллекция ресурсов проекта.");
         }
 
+        if (project.ReadingProgress is { } progress)
+        {
+            if (progress.SceneIndex < 0
+                || progress.SceneIndex >= project.Scenes.Count
+                || (progress.IsFinished
+                    && progress.SceneIndex != project.Scenes.Count - 1))
+            {
+                throw new InvalidDataException(
+                    "В файле указан некорректный прогресс чтения.");
+            }
+        }
+
         foreach (var item in project.AssetNames)
         {
             if (!project.Assets.ContainsKey(item.Key)
@@ -267,10 +279,28 @@ public static class ProjectArchive
             if (scene is null
                 || string.IsNullOrWhiteSpace(scene.Name)
                 || scene.Name.Length > 80
-                || scene.Text is null)
+                || scene.Text is null
+                || scene.Heading is null
+                || scene.Heading.Length > 80)
             {
                 throw new InvalidDataException(
                     "В проекте найдена некорректная сцена.");
+            }
+
+            ValidateSceneResource(
+                project, scene.BackgroundPath, "backgrounds");
+
+            ValidateSceneResource(
+                project, scene.CharacterPath, "characters");
+
+            ValidateSceneResource(
+                project, scene.MusicPath, "music");
+
+            if (scene.CharacterSide != "left"
+                && scene.CharacterSide != "right")
+            {
+                throw new InvalidDataException(
+                    "Некорректное положение персонажа.");
             }
         }
     }
@@ -287,6 +317,26 @@ public static class ProjectArchive
         {
             throw new InvalidDataException(
                 "Некорректный путь ресурса внутри проекта.");
+        }
+    }
+
+    private static void ValidateSceneResource(
+    NovelProject project,
+    string? path,
+    string folder)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return;
+        }
+
+        if (!path.StartsWith(
+                $"assets/{folder}/",
+                StringComparison.Ordinal)
+            || !project.Assets.ContainsKey(path))
+        {
+            throw new InvalidDataException(
+                "Сцена ссылается на отсутствующий или неподходящий ресурс.");
         }
     }
 }

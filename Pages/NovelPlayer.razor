@@ -1,0 +1,316 @@
+﻿@inject IJSRuntime JS
+
+<PageTitle>Your Novel Library</PageTitle>
+
+<NovelMusic Project="@Project"
+            TrackPath="@(Book.IsFinished
+                ? null
+                : CurrentScene.MusicPath)" />
+
+<section class="novel-player tap-player"
+         @onclick="Advance"
+         @onpointerdown="BeginPointer"
+         @onpointermove="TrackPointer"
+         @onpointerup="EndPointer"
+         @onpointercancel="CancelPointer">
+
+    <button @ref="tapArea"
+            type="button"
+            class="reader-tap-area"
+            aria-label="@(Book.IsFinished
+                        ? "Вернуться в главное меню"
+                        : "Следующая сцена")">
+    </button>
+
+    <button class="editor-button reader-settings-button"
+            title="Меню"
+            aria-label="Открыть меню новеллы"
+            disabled="@isSavingProgress"
+            @onclick="OpenMenu"
+            @onclick:stopPropagation="true">
+        <span aria-hidden="true">⚙</span>
+    </button>
+
+    @if (!menuOpen && menuMessage is not null)
+    {
+        <p class="reader-menu-notice" role="status">
+            @menuMessage
+        </p>
+    }
+
+    @if (Book.IsFinished)
+    {
+        <div class="reader-end tap-reader-end">
+            <h2>Конец истории</h2>
+            <p>Коснись экрана, чтобы вернуться в главное меню.</p>
+        </div>
+    }
+    else
+    {
+        <ProjectImage Project="@Project"
+                      AssetPath="@CurrentScene.BackgroundPath"
+                      CssClass="preview-background"
+                      Alt="Фон сцены" />
+
+        <ProjectImage Project="@Project"
+                      AssetPath="@CurrentScene.CharacterPath"
+                      CssClass="@($"preview-character is-{CurrentScene.CharacterSide}")"
+                      Alt="@CharacterName" />
+
+        <div @key="Book.SceneIndex"
+             class="preview-dialogue reader-dialogue"
+             aria-live="polite"
+             aria-atomic="true">
+
+            @if (!string.IsNullOrWhiteSpace(CurrentScene.Heading))
+            {
+                <h2>@CurrentScene.Heading</h2>
+            }
+
+            <p>@CurrentScene.Text</p>
+        </div>
+    }
+</section>
+
+<dialog @ref="pauseDialog"
+        class="reader-pause-dialog"
+        aria-labelledby="reader-pause-title"
+        @onclose="MenuClosed"
+        @onclick="CloseMenu">
+
+    <div class="reader-pause-panel"
+         @onclick:stopPropagation="true">
+        <h2 id="reader-pause-title">Меню</h2>
+
+        <button class="editor-button"
+                disabled="@isSavingProgress"
+                @onclick="SaveProgress">
+            @(isSavingProgress
+                ? "Сохраняем…"
+                : "Сохранить прогресс")
+        </button>
+
+        <button class="editor-button"
+                disabled="@isSavingProgress"
+                @onclick="ExitPlayer">
+            Выйти
+        </button>
+
+        @if (menuMessage is not null)
+        {
+            <p class="reader-pause-message" role="status">
+                @menuMessage
+            </p>
+        }
+    </div>
+</dialog>
+
+@code {
+    [Parameter, EditorRequired]
+    public LibraryNovel Book { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private ElementReference tapArea;
+
+    private long? activePointerId;
+    private double pointerStartX;
+    private double pointerStartY;
+    private bool pointerMoved;
+
+    private NovelProject Project => Book.Project;
+
+    private NovelScene CurrentScene =>
+        Project.Scenes[Book.SceneIndex];
+
+    private string CharacterName =>
+        CurrentScene.CharacterPath is not null
+        && Project.AssetNames.TryGetValue(
+            CurrentScene.CharacterPath, out var name)
+                ? name
+                : "Персонаж";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await tapArea.FocusAsync(preventScroll: true);
+        }
+    }
+
+    private void BeginPointer(PointerEventArgs args)
+    {
+        if (!args.IsPrimary || args.Button != 0)
+        {
+            return;
+        }
+
+        activePointerId = args.PointerId;
+        pointerStartX = args.ClientX;
+        pointerStartY = args.ClientY;
+        pointerMoved = false;
+    }
+
+    private void TrackPointer(PointerEventArgs args)
+    {
+        if (activePointerId != args.PointerId)
+        {
+            return;
+        }
+
+        if (Math.Abs(args.ClientX - pointerStartX) > 12
+            || Math.Abs(args.ClientY - pointerStartY) > 12)
+        {
+            pointerMoved = true;
+        }
+    }
+
+    private void EndPointer(PointerEventArgs args)
+    {
+        TrackPointer(args);
+
+        if (activePointerId == args.PointerId)
+        {
+            activePointerId = null;
+        }
+    }
+
+    private void CancelPointer(PointerEventArgs args)
+    {
+        if (activePointerId == args.PointerId)
+        {
+            pointerMoved = true;
+            activePointerId = null;
+        }
+    }
+
+    private async Task Advance(MouseEventArgs args)
+    {
+        if (menuOpen
+            || isSavingProgress
+            || args.Button != 0
+            || (args.Detail > 0 && pointerMoved))
+        {
+            return;
+        }
+
+        if (Book.IsFinished)
+        {
+            await OnBack.InvokeAsync();
+            return;
+        }
+
+        if (Book.SceneIndex < Project.Scenes.Count - 1)
+        {
+            Book.SceneIndex++;
+        }
+        else
+        {
+            Book.IsFinished = true;
+        }
+    }
+
+    private ElementReference pauseDialog;
+
+    private bool menuOpen;
+    private bool isSavingProgress;
+    private string? menuMessage;
+
+    private async Task OpenMenu()
+    {
+        menuMessage = null;
+        menuOpen = true;
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "novelUi.openDialog", pauseDialog);
+        }
+        catch (JSException)
+        {
+            menuOpen = false;
+            menuMessage = "Не удалось открыть меню.";
+        }
+    }
+
+    private async Task CloseMenu()
+    {
+        if (isSavingProgress)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "novelUi.closeDialog", pauseDialog);
+        }
+        catch (JSException)
+        {
+            menuMessage = "Не удалось закрыть меню.";
+        }
+    }
+
+    private void MenuClosed()
+    {
+        menuOpen = false;
+        activePointerId = null;
+        pointerMoved = false;
+    }
+
+    private async Task SaveProgress()
+    {
+        if (isSavingProgress)
+        {
+            return;
+        }
+
+        isSavingProgress = true;
+        menuMessage = null;
+
+        var previousProgress = Project.ReadingProgress;
+
+        try
+        {
+            Project.ReadingProgress = new NovelProgress
+            {
+                SceneIndex = Book.SceneIndex,
+                IsFinished = Book.IsFinished
+            };
+
+            using var stream =
+                await ProjectArchive.CreateAsync(Project);
+
+            using var reference = new DotNetStreamReference(
+                stream, leaveOpen: true);
+
+            await JS.InvokeVoidAsync(
+                "novelFiles.download",
+                Project.Title + " — прогресс",
+                reference);
+
+            menuMessage =
+                "Файл с прогрессом передан браузеру. "
+                + "Для продолжения открой сохранённую копию.";
+        }
+        catch (InvalidDataException exception)
+        {
+            menuMessage = exception.Message;
+        }
+        catch (JSException)
+        {
+            menuMessage = "Не удалось начать скачивание файла.";
+        }
+        finally
+        {
+            Project.ReadingProgress = previousProgress;
+            isSavingProgress = false;
+        }
+    }
+
+    private Task ExitPlayer()
+    {
+        return OnBack.InvokeAsync();
+    }
+}

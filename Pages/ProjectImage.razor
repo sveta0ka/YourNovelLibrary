@@ -1,0 +1,138 @@
+﻿@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@if (imageUrl is not null && !failed)
+{
+    <img @key="imageUrl"
+         src="@imageUrl"
+         class="@CssClass"
+         alt="@Alt"
+         @onerror="ImageFailed" />
+}
+else if (failed)
+{
+    <span class="preview-image-error" role="status">
+        Не удалось показать: @Alt
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public NovelProject Project { get; set; } = default!;
+
+    [Parameter]
+    public string? AssetPath { get; set; }
+
+    [Parameter]
+    public string CssClass { get; set; } = string.Empty;
+
+    [Parameter]
+    public string Alt { get; set; } = "Изображение";
+
+    private string? imageUrl;
+    private string? loadedPath;
+    private byte[]? loadedBytes;
+
+    private bool failed;
+    private bool disposed;
+    private int requestVersion;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        Project.Assets.TryGetValue(
+            AssetPath ?? string.Empty, out var bytes);
+
+        if (loadedPath == AssetPath
+            && ReferenceEquals(loadedBytes, bytes))
+        {
+            return;
+        }
+
+        loadedPath = AssetPath;
+        loadedBytes = bytes;
+
+        var version = ++requestVersion;
+        string? nextUrl = null;
+        var nextFailed = false;
+
+        if (bytes is not null)
+        {
+            try
+            {
+                nextUrl = await JS.InvokeAsync<string>(
+                    "novelImages.createUrl",
+                    bytes,
+                    GetContentType(AssetPath));
+            }
+            catch (JSException)
+            {
+                nextFailed = true;
+            }
+        }
+        else if (!string.IsNullOrEmpty(AssetPath))
+        {
+            nextFailed = true;
+        }
+
+        if (disposed || version != requestVersion)
+        {
+            await ReleaseAsync(nextUrl);
+            return;
+        }
+
+        var previousUrl = imageUrl;
+
+        imageUrl = nextUrl;
+        failed = nextFailed;
+
+        await ReleaseAsync(previousUrl);
+    }
+
+    private void ImageFailed()
+    {
+        failed = true;
+    }
+
+    private static string GetContentType(string? path)
+    {
+        return Path.GetExtension(path ?? string.Empty)
+            .ToLowerInvariant() switch
+        {
+            ".png" => "image/png",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".webp" => "image/webp",
+            _ => "application/octet-stream"
+        };
+    }
+
+    private async ValueTask ReleaseAsync(string? url)
+    {
+        if (url is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync("novelImages.revokeUrl", url);
+        }
+        catch (JSException)
+        {
+            // При закрытии страницы среда браузера уже может завершаться.
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        requestVersion++;
+
+        await ReleaseAsync(imageUrl);
+        imageUrl = null;
+    }
+}

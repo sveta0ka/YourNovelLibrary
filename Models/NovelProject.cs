@@ -19,6 +19,8 @@ public sealed class NovelProject
     [JsonIgnore]
     public Dictionary<string, byte[]> Assets { get; set; } = new();
     public Dictionary<string, string> AssetNames { get; set; } = new();
+
+    public NovelProgress? ReadingProgress { get; set; }
 }
 
 public sealed class NovelScene
@@ -28,4 +30,23 @@ public sealed class NovelScene
 
     [JsonRequired]
     public string Text { get; set; } = string.Empty;
+
+    public string Heading { get; set; } = string.Empty;
+
+    public string? BackgroundPath { get; set; }
+
+    public string? CharacterPath { get; set; }
+
+    public string CharacterSide { get; set; } = "left";
+
+    public string? MusicPath { get; set; }
+}
+
+public sealed class NovelProgress
+{
+    [JsonRequired]
+    public int SceneIndex { get; set; }
+
+    [JsonRequired]
+    public bool IsFinished { get; set; }
 }

@@ -5,11 +5,13 @@
     <ProjectSettings Project="@Project"
                      OnBack="CloseSettings" />
 }
-else if (editingScene is null)
+else
 {
-    <section class="novel-editor">
+    <section class="novel-editor @(isSceneListVisible ? "" : "scenes-collapsed")">
         <header class="editor-header">
-            <button class="editor-button" @onclick="ExitEditor">
+            <button class="editor-button"
+                    disabled="@isSaving"
+                    @onclick="HandleBack">
                 Назад
             </button>
 
@@ -32,103 +34,247 @@ else if (editingScene is null)
             </button>
         </header>
 
-        <div class="scene-preview" aria-label="Предпросмотр сцены">
-            <span class="preview-label">Предпросмотр</span>
-            <h2>@selectedScene.Name</h2>
+        <div class="scene-preview visual-preview"
+             aria-label="Предпросмотр сцены">
 
-            <p>
-                @(string.IsNullOrWhiteSpace(selectedScene.Text)
-                    ? "Здесь появится текст выбранной сцены."
-                    : selectedScene.Text)
-            </p>
+            <ProjectImage Project="@Project"
+                          AssetPath="@PreviewBackgroundPath"
+                          CssClass="preview-background"
+                          Alt="Фон сцены" />
+
+            <ProjectImage Project="@Project"
+                          AssetPath="@PreviewCharacterPath"
+                          CssClass="@($"preview-character is-{PreviewCharacterSide}")"
+                          Alt="@GetAssetName(PreviewCharacterPath)" />
+
+            <span class="preview-label">Предпросмотр</span>
+
+            <div class="preview-dialogue">
+                <h2>
+                    @if (!string.IsNullOrWhiteSpace(PreviewHeading))
+                    {
+                        <h2>@PreviewHeading</h2>
+                    }
+                </h2>
+
+                <p>
+                    @(string.IsNullOrWhiteSpace(PreviewText)
+                        ? "Здесь появится текст выбранной сцены."
+                        : PreviewText)
+                </p>
+            </div>
         </div>
 
-        <h2 class="scene-list-heading">Список сцен</h2>
+        <div class="scene-list-toolbar">
+            <h2 class="scene-list-heading">
+                @(editingScene is null
+                    ? "Список сцен"
+                    : "Настройки: " + editingScene.Name)
+            </h2>
 
-        <div class="scene-list">
-            @foreach (var scene in scenes)
+            <button class="scene-edit-button"
+                    title="@SceneListToggleLabel"
+                    aria-label="@SceneListToggleLabel"
+                    aria-expanded="@(isSceneListVisible ? "true" : "false")"
+                    aria-controls="scene-list"
+                    @onclick="ToggleSceneList">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M2 12C4.5 7 8 5 12 5s7.5 2 10 7c-2.5 5-6 7-10 7S4.5 17 2 12Z" />
+                    <circle cx="12" cy="12" r="3" />
+
+                    @if (!isSceneListVisible)
+                    {
+                        <path d="M3 3L21 21" />
+                    }
+                </svg>
+            </button>
+        </div>
+
+        <div id="scene-list"
+             class="scene-list @(editingScene is null ? "" : "scene-settings-panel")"
+             hidden="@(!isSceneListVisible)">
+
+            @if (editingScene is null)
             {
-                <div @key="scene"
-                     class="scene-row @(selectedScene == scene ? "is-selected" : "")">
+                @foreach (var scene in scenes)
+                {
+                    <div @key="scene"
+                         class="scene-row @(selectedScene == scene ? "is-selected" : "")">
+                        <button class="scene-select"
+                                aria-pressed="@(selectedScene == scene)"
+                                @onclick="() => SelectScene(scene)">
+                            @scene.Name
+                        </button>
 
-                    <button class="scene-select"
-                            aria-pressed="@(selectedScene == scene)"
-                            @onclick="() => SelectScene(scene)">
-                        @scene.Name
-                    </button>
+                        <button class="scene-edit-button"
+                                title="Скопировать сцену"
+                                aria-label="@($"Скопировать сцену: {scene.Name}")"
+                                @onclick="() => CopyScene(scene)">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="8" y="8" width="12" height="12" rx="2" />
+                                <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+                            </svg>
+                        </button>
 
-                    <button class="scene-edit-button"
-                            title="Изменить сцену"
-                            aria-label="@($"Редактировать сцену: {scene.Name}")"
-                            @onclick="() => EditScene(scene)">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M16 3 L21 8 L9 20 L4 20 L4 15 Z M14 5 L19 10" />
-                        </svg>
+                        <button class="scene-edit-button"
+                                title="Изменить сцену"
+                                aria-label="@($"Редактировать сцену: {scene.Name}")"
+                                @onclick="() => EditScene(scene)">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M16 3 L21 8 L9 20 L4 20 L4 15 Z M14 5 L19 10" />
+                            </svg>
+                        </button>
+
+                        <button class="scene-edit-button scene-delete-button"
+                                title="Удалить сцену"
+                                aria-label="@($"Удалить сцену: {scene.Name}")"
+                                disabled="@(scenes.Count <= 1 || isSaving || isDeletingScene)"
+                                @onclick="() => DeleteScene(scene)">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" />
+                            </svg>
+                        </button>
+                    </div>
+                }
+            }
+            else
+            {
+                <form id="scene-settings-form"
+                      class="project-form"
+                      @onsubmit="ApplyChanges"
+                      @onsubmit:preventDefault>
+
+                    <label for="scene-background">Фон</label>
+
+                    <select id="scene-background"
+                            class="project-input"
+                            @bind="draftBackgroundPath">
+                        <option value="">Без фона</option>
+
+                        @foreach (var path in BackgroundPaths)
+                        {
+                            <option value="@path">
+                                @GetAssetName(path)
+                            </option>
+                        }
+                    </select>
+
+                    <label for="scene-character">Персонаж</label>
+
+                    <select id="scene-character"
+                            class="project-input"
+                            @bind="draftCharacterPath">
+                        <option value="">Без персонажа</option>
+
+                        @foreach (var path in CharacterPaths)
+                        {
+                            <option value="@path">
+                                @GetAssetName(path)
+                            </option>
+                        }
+                    </select>
+
+                    <fieldset class="character-position"
+                              disabled="@string.IsNullOrEmpty(draftCharacterPath)">
+                        <legend>Положение персонажа</legend>
+
+                        <div class="position-options">
+                            <label class="position-option">
+                                <input type="radio"
+                                       name="character-side"
+                                       value="left"
+                                       checked="@(draftCharacterSide == "left")"
+                                       @onchange="PositionLeft" />
+                                <span>Слева</span>
+                            </label>
+
+                            <label class="position-option">
+                                <input type="radio"
+                                       name="character-side"
+                                       value="right"
+                                       checked="@(draftCharacterSide == "right")"
+                                       @onchange="PositionRight" />
+                                <span>Справа</span>
+                            </label>
+                        </div>
+                    </fieldset>
+
+                    <label for="scene-heading">Заголовок</label>
+
+                    <input id="scene-heading"
+                           class="project-input"
+                           @bind="draftHeading"
+                           @bind:event="oninput"
+                           maxlength="80" />
+
+                    <label for="scene-text">Текст</label>
+
+                    <textarea id="scene-text"
+                              class="project-input"
+                              @bind="draftText"
+                              @bind:event="oninput"
+                              rows="5"></textarea>
+
+                    <label for="scene-music">Музыка</label>
+
+                    <select id="scene-music"
+                            class="project-input"
+                            @bind="draftMusicPath">
+                        <option value="">Без музыки</option>
+
+                        @foreach (var path in MusicPaths)
+                        {
+                            <option value="@path">
+                                @GetAssetName(path)
+                            </option>
+                        }
+                    </select>
+
+                    @if (errorMessage is not null)
+                    {
+                        <p class="scene-form-error" role="alert">
+                            @errorMessage
+                        </p>
+                    }
+
+                    <button type="button"
+                            class="menu-back"
+                            @onclick="CancelEdit">
+                        Отмена
                     </button>
-                </div>
+                </form>
             }
         </div>
 
-        <footer class="editor-footer">
+        <footer class="editor-footer"
+                hidden="@(!isSceneListVisible && fileMessage is null)">
             @if (fileMessage is not null)
             {
                 <p class="editor-file-message" role="status">
                     @fileMessage
                 </p>
             }
-            <button class="scene-add-button"
-                    aria-label="Добавить сцену"
-                    @onclick="AddScene">
-                +
-            </button>
-        </footer>
-    </section>
-}
-else
-{
-    <section class="novel-editor scene-edit-mode">
-        <header class="editor-header">
-            <button class="editor-button" @onclick="CancelEdit">
-                Назад
-            </button>
 
-            <h1 class="editor-title">Изменить сцену</h1>
-        </header>
-
-        <div class="scene-edit-body">
-            <form class="project-form"
-                  @onsubmit="ApplyChanges"
-                  @onsubmit:preventDefault>
-
-                <label for="scene-name">Название сцены</label>
-                <input id="scene-name"
-                       class="project-input"
-                       @bind="draftName"
-                       maxlength="80" />
-
-                <label for="scene-text">Текст сцены</label>
-                <textarea id="scene-text"
-                          class="project-input"
-                          @bind="draftText"
-                          rows="8"></textarea>
-
-                @if (errorMessage is not null)
+            @if (isSceneListVisible)
+            {
+                @if (editingScene is null)
                 {
-                    <p class="scene-form-error" role="alert">
-                        @errorMessage
-                    </p>
+                    <button class="scene-add-button"
+                            aria-label="Добавить сцену"
+                            @onclick="AddScene">
+                        +
+                    </button>
                 }
-
-                <button type="submit" class="project-submit">
-                    Применить
-                </button>
-
-                <button type="button" class="menu-back"
-                        @onclick="CancelEdit">
-                    Отмена
-                </button>
-            </form>
-        </div>
+                else
+                {
+                    <button type="submit"
+                            form="scene-settings-form"
+                            class="project-submit scene-save-button">
+                        Сохранить сцену
+                    </button>
+                }
+            }
+        </footer>
     </section>
 }
 
@@ -144,16 +290,95 @@ else
     private NovelScene selectedScene = default!;
     private NovelScene? editingScene;
 
+    private bool showSettings;
     private bool isSaving;
-    private string? fileMessage;
+    private bool isSceneListVisible = true;
 
-    private string draftName = string.Empty;
-    private string draftText = string.Empty;
+    private string? fileMessage;
     private string? errorMessage;
+
+    private string draftHeading = string.Empty;
+    private string draftText = string.Empty;
+    private string draftBackgroundPath = string.Empty;
+    private string draftCharacterPath = string.Empty;
+    private string draftCharacterSide = "left";
+
+    private string PreviewHeading =>
+    editingScene is null
+        ? selectedScene.Heading
+        : draftHeading;
+
+    private string PreviewText =>
+        editingScene is null ? selectedScene.Text : draftText;
+
+    private string? PreviewBackgroundPath =>
+        editingScene is null
+            ? selectedScene.BackgroundPath
+            : draftBackgroundPath;
+
+    private string? PreviewCharacterPath =>
+        editingScene is null
+            ? selectedScene.CharacterPath
+            : draftCharacterPath;
+
+    private string PreviewCharacterSide =>
+        editingScene is null
+            ? selectedScene.CharacterSide
+            : draftCharacterSide;
+
+    private string SceneListToggleLabel =>
+        isSceneListVisible
+            ? "Скрыть нижнюю панель"
+            : "Показать нижнюю панель";
+
+    private IEnumerable<string> BackgroundPaths =>
+        GetResourcePaths("backgrounds");
+
+    private IEnumerable<string> CharacterPaths =>
+        GetResourcePaths("characters");
 
     protected override void OnInitialized()
     {
+        for (var i = 0; i < scenes.Count; i++)
+        {
+            var scene = scenes[i];
+
+            var hasNumberedName =
+                System.Text.RegularExpressions.Regex.IsMatch(
+                    scene.Name,
+                    @"^Сцена \d+$");
+
+            if (string.IsNullOrWhiteSpace(scene.Heading)
+                && !hasNumberedName)
+            {
+                scene.Heading = scene.Name;
+            }
+
+            scene.Name = $"Сцена {i + 1}";
+        }
+
         selectedScene = scenes[0];
+    }
+
+    private IEnumerable<string> GetResourcePaths(string folder)
+    {
+        return Project.Assets.Keys
+            .Where(path => path.StartsWith(
+                $"assets/{folder}/",
+                StringComparison.Ordinal))
+            .OrderBy(GetAssetName, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private string GetAssetName(string? path)
+    {
+        if (string.IsNullOrEmpty(path))
+        {
+            return "Персонаж";
+        }
+
+        return Project.AssetNames.TryGetValue(path, out var name)
+            ? name
+            : Path.GetFileNameWithoutExtension(path);
     }
 
     private void SelectScene(NovelScene scene)
@@ -170,50 +395,125 @@ else
 
         scenes.Add(scene);
         selectedScene = scene;
+        fileMessage = null;
     }
 
     private void EditScene(NovelScene scene)
     {
+        selectedScene = scene;
         editingScene = scene;
-        draftName = scene.Name;
+
+        draftHeading = scene.Heading;
         draftText = scene.Text;
+        draftBackgroundPath = scene.BackgroundPath ?? string.Empty;
+        draftCharacterPath = scene.CharacterPath ?? string.Empty;
+        draftCharacterSide = scene.CharacterSide;
+        draftMusicPath = scene.MusicPath ?? string.Empty;
+
         errorMessage = null;
+        fileMessage = null;
+        isSceneListVisible = true;
+    }
+
+    private void PositionLeft()
+    {
+        draftCharacterSide = "left";
+    }
+
+    private void PositionRight()
+    {
+        draftCharacterSide = "right";
     }
 
     private void ApplyChanges()
     {
+        TryApplySceneChanges();
+    }
+
+    private bool TryApplySceneChanges()
+    {
         if (editingScene is null)
         {
-            return;
+            return true;
         }
 
-        if (string.IsNullOrWhiteSpace(draftName))
+        var heading = draftHeading.Trim();
+
+        if (heading.Length > 80)
         {
-            errorMessage = "Введи название сцены.";
-            return;
+            errorMessage = "Заголовок должен быть не длиннее 80 символов.";
+            isSceneListVisible = true;
+            return false;
         }
 
-        editingScene.Name = draftName.Trim();
+        editingScene.Heading = heading;
         editingScene.Text = draftText;
+
+        editingScene.BackgroundPath =
+            string.IsNullOrEmpty(draftBackgroundPath)
+                ? null
+                : draftBackgroundPath;
+
+        editingScene.CharacterPath =
+            string.IsNullOrEmpty(draftCharacterPath)
+                ? null
+                : draftCharacterPath;
+
+        editingScene.CharacterSide = draftCharacterSide;
+
+        editingScene.MusicPath =
+            string.IsNullOrEmpty(draftMusicPath)
+                ? null
+                : draftMusicPath;
 
         selectedScene = editingScene;
         editingScene = null;
+
+        errorMessage = null;
+        fileMessage = null;
+        isSceneListVisible = true;
+
+        return true;
     }
 
     private void CancelEdit()
     {
         editingScene = null;
         errorMessage = null;
+        fileMessage = null;
+        isSceneListVisible = true;
     }
 
-    private Task ExitEditor()
+    private async Task HandleBack()
     {
-        return OnBack.InvokeAsync();
+        if (editingScene is not null)
+        {
+            CancelEdit();
+            return;
+        }
+
+        await OnBack.InvokeAsync();
+    }
+
+    private void OpenSettings()
+    {
+        showSettings = true;
+    }
+
+    private void CloseSettings()
+    {
+        showSettings = false;
+        fileMessage = null;
+    }
+
+    private void ToggleSceneList()
+    {
+        isSceneListVisible = !isSceneListVisible;
     }
 
     private async Task SaveProject()
     {
-        if (isSaving)
+        if (isSaving || !TryApplySceneChanges())
         {
             return;
         }
@@ -223,6 +523,8 @@ else
 
         try
         {
+            Project.ReadingProgress = null;
+
             using var stream =
                 await ProjectArchive.CreateAsync(Project);
 
@@ -251,16 +553,94 @@ else
         }
     }
 
-    private bool showSettings;
-
-    private void OpenSettings()
+    private void CopyScene(NovelScene source)
     {
-        showSettings = true;
-    }
+        var sourceIndex = scenes.IndexOf(source);
 
-    private void CloseSettings()
-    {
-        showSettings = false;
+        if (sourceIndex < 0)
+        {
+            return;
+        }
+
+        var copy = new NovelScene
+        {
+            Heading = source.Heading,
+            Text = source.Text,
+            BackgroundPath = source.BackgroundPath,
+            CharacterPath = source.CharacterPath,
+            CharacterSide = source.CharacterSide,
+            MusicPath = source.MusicPath,
+        };
+
+        scenes.Insert(sourceIndex + 1, copy);
+
+        for (var i = 0; i < scenes.Count; i++)
+        {
+            scenes[i].Name = $"Сцена {i + 1}";
+        }
+
+        selectedScene = copy;
         fileMessage = null;
+        errorMessage = null;
     }
+
+    private bool isDeletingScene;
+
+    private async Task DeleteScene(NovelScene scene)
+    {
+        if (scenes.Count <= 1 || isSaving || isDeletingScene)
+        {
+            return;
+        }
+
+        isDeletingScene = true;
+
+        try
+        {
+            var confirmed = await JS.InvokeAsync<bool>(
+                "confirm",
+                $"Удалить «{scene.Name}»?");
+
+            if (!confirmed)
+            {
+                return;
+            }
+
+            var index = scenes.IndexOf(scene);
+
+            if (index < 0 || scenes.Count <= 1)
+            {
+                return;
+            }
+
+            scenes.RemoveAt(index);
+
+            if (selectedScene == scene)
+            {
+                selectedScene = scenes[Math.Min(index, scenes.Count - 1)];
+            }
+
+            for (var i = 0; i < scenes.Count; i++)
+            {
+                scenes[i].Name = $"Сцена {i + 1}";
+            }
+
+            fileMessage = null;
+            errorMessage = null;
+        }
+        catch (JSException)
+        {
+            fileMessage =
+                "Не удалось открыть подтверждение. Сцена не удалена.";
+        }
+        finally
+        {
+            isDeletingScene = false;
+        }
+    }
+
+    private string draftMusicPath = string.Empty;
+
+    private IEnumerable<string> MusicPaths =>
+        GetResourcePaths("music");
 }

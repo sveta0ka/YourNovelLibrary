@@ -1,0 +1,170 @@
+﻿@if (selectedBook is not null)
+{
+    <NovelPlayer @key="selectedBook"
+                 Book="@selectedBook"
+                 OnBack="ClosePlayer" />
+}
+else
+{
+    <h1>Моя библиотека</h1>
+    <p class="menu-subtitle">Добавляй истории и отправляйся в приключение.</p>
+
+    <label class="menu-card file-open-card">
+        <strong>Добавить новеллу</strong>
+        <span>
+            @(isLoading
+                ? "Открываем архив…"
+                : "Выбрать файл .ynl с устройства")
+        </span>
+
+        <InputFile @key="fileInputKey"
+                   OnChange="LoadNovel"
+                   disabled="@isLoading"
+                   aria-label="Добавить новеллу из файла" />
+    </label>
+
+    @if (errorMessage is not null)
+    {
+        <p class="project-file-message library-error" role="alert">
+            @errorMessage
+        </p>
+    }
+
+    <div class="library-list">
+        @foreach (var book in Books)
+        {
+            <button class="menu-card"
+                    @key="book"
+                    disabled="@isLoading"
+                    @onclick="() => OpenNovel(book)">
+                <strong>@book.Project.Title</strong>
+                <span>@GetCaption(book)</span>
+            </button>
+        }
+    </div>
+
+    @if (Books.Count == 0)
+    {
+        <p class="resource-empty">
+            Здесь пока нет новелл. Добавь сохранённый архив.
+        </p>
+    }
+
+    <button class="menu-back"
+            disabled="@isLoading"
+            @onclick="BackToMainMenu">
+        Вернуться в главное меню
+    </button>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public List<LibraryNovel> Books { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private LibraryNovel? selectedBook;
+    private bool isLoading;
+    private string? errorMessage;
+    private int fileInputKey;
+
+    private async Task LoadNovel(InputFileChangeEventArgs args)
+    {
+        if (isLoading)
+        {
+            return;
+        }
+
+        isLoading = true;
+        errorMessage = null;
+
+        try
+        {
+            var file = args.File;
+
+            if (file.Size > ProjectArchive.MaxFileSize)
+            {
+                errorMessage = "Файл превышает лимит в 50 МБ.";
+                return;
+            }
+
+            await using var input =
+                file.OpenReadStream(ProjectArchive.MaxFileSize);
+
+            var project = await ProjectArchive.ReadAsync(input);
+
+            Books.Add(new LibraryNovel
+            {
+                Project = project
+            });
+        }
+        catch (InvalidDataException)
+        {
+            errorMessage =
+                "Не удалось открыть новеллу. Архив повреждён, "
+                + "имеет другой формат или превышает допустимые ограничения.";
+        }
+        catch (JsonException)
+        {
+            errorMessage =
+                "Описание новеллы повреждено или имеет неподдерживаемую структуру.";
+        }
+        catch (NotSupportedException)
+        {
+            errorMessage =
+                "Этот способ упаковки архива пока не поддерживается.";
+        }
+        catch (IOException)
+        {
+            errorMessage = "Не удалось прочитать файл.";
+        }
+        catch (JSException)
+        {
+            errorMessage =
+                "Браузер не смог открыть файл. Попробуй выбрать его снова.";
+        }
+        finally
+        {
+            isLoading = false;
+            fileInputKey++;
+        }
+    }
+
+    private void OpenNovel(LibraryNovel book)
+    {
+        if (book.IsFinished)
+        {
+            book.SceneIndex = 0;
+            book.IsFinished = false;
+        }
+
+        book.HasStarted = true;
+        selectedBook = book;
+    }
+
+    private void ClosePlayer()
+    {
+        selectedBook = null;
+    }
+
+    private static string GetCaption(LibraryNovel book)
+    {
+        if (book.IsFinished)
+        {
+            return "Прочитано · Начать заново";
+        }
+
+        if (book.HasStarted)
+        {
+            return $"Продолжить · {book.SceneIndex + 1} из {book.Project.Scenes.Count}";
+        }
+
+        return $"Начать чтение · Сцен: {book.Project.Scenes.Count}";
+    }
+
+    private Task BackToMainMenu()
+    {
+        return OnBack.InvokeAsync();
+    }
+}

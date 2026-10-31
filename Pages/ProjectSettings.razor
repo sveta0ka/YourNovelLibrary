@@ -52,6 +52,13 @@
                 </button>
             </div>
 
+            <div class="resource-settings-row">
+                <span>Музыка</span>
+                <button class="editor-button" @onclick="OpenMusic">
+                    Добавить
+                </button>
+            </div>
+
             @foreach (var name in disabledSections)
             {
                 <div class="resource-settings-row">
@@ -67,7 +74,7 @@
             @if (!ResourcePaths.Any())
             {
                 <p class="resource-empty">
-                    Здесь пока нет изображений.
+                    Здесь пока нет файлов.
                     Нажми «Добавить» внизу экрана.
                 </p>
             }
@@ -76,7 +83,13 @@
                 @foreach (var path in ResourcePaths)
                 {
                     <article class="asset-card" @key="path">
-                        @if (thumbnails.TryGetValue(path, out var thumbnail))
+                        @if (IsMusicGallery)
+                        {
+                            <div class="asset-image music-placeholder" aria-hidden="true">
+                                ♪
+                            </div>
+                        }
+                        else if (thumbnails.TryGetValue(path, out var thumbnail))
                         {
                             <img class="asset-image"
                                  src="@thumbnail"
@@ -122,17 +135,19 @@
         @if (gallery is not null && renamingPath is null)
         {
             <p class="resource-hint">
-                PNG, JPEG или WebP · до 10 МБ на изображение
+                @(IsMusicGallery
+                    ? "MP3, M4A или WAV · до 20 МБ на файл"
+                    : "PNG, JPEG или WebP · до 10 МБ на изображение")
             </p>
 
             <label class="resource-add file-open-card">
                 @(isBusy ? "Загружаем…" : "Добавить")
 
                 <InputFile @key="fileInputKey"
-                           OnChange="AddImage"
-                           accept=".png,.jpg,.jpeg,.webp"
+                           OnChange="AddResource"
+                           accept="@AcceptedFiles"
                            disabled="@isBusy"
-                           aria-label="Добавить изображение" />
+                           aria-label="Добавить файл ресурса" />
             </label>
         }
     </footer>
@@ -151,7 +166,6 @@
     private readonly string[] disabledSections =
     {
         "Оформление диалогов",
-        "Музыка",
         "Звуки"
     };
 
@@ -172,6 +186,7 @@
             {
                 "backgrounds" => "Фоны",
                 "characters" => "Персонажи",
+                "music" => "Музыка",
                 _ => "Настройки проекта"
             };
 
@@ -204,7 +219,14 @@
     {
         gallery = folder;
         message = null;
+
+        if (folder == "music")
+        {
+            return;
+        }
+
         isBusy = true;
+
 
         try
         {
@@ -409,5 +431,114 @@
         }
 
         return null;
+    }
+
+    private const long MaxMusicSize = 20 * 1024 * 1024;
+
+    private bool IsMusicGallery => gallery == "music";
+
+    private string AcceptedFiles =>
+        IsMusicGallery
+            ? ".mp3,.m4a,.wav"
+            : ".png,.jpg,.jpeg,.webp";
+
+    private Task OpenMusic()
+    {
+        return OpenGallery("music");
+    }
+
+    private Task AddResource(InputFileChangeEventArgs args)
+    {
+        return IsMusicGallery
+            ? AddMusic(args)
+            : AddImage(args);
+    }
+
+    private async Task AddMusic(InputFileChangeEventArgs args)
+    {
+        if (isBusy || gallery != "music")
+        {
+            return;
+        }
+
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            var file = args.File;
+            var extension = Path.GetExtension(file.Name).ToLowerInvariant();
+
+            if (extension is not (".mp3" or ".m4a" or ".wav"))
+            {
+                message = "Выбери аудиофайл MP3, M4A или WAV.";
+                return;
+            }
+
+            if (file.Size > MaxMusicSize)
+            {
+                message = "Аудиофайл должен быть не больше 20 МБ.";
+                return;
+            }
+
+            if (Project.Assets.Count >= 2000)
+            {
+                message = "В проекте слишком много ресурсов.";
+                return;
+            }
+
+            var usedSize = Project.Assets.Values.Sum(
+                bytes => bytes.LongLength);
+
+            if (usedSize + file.Size > MaxResourceSize)
+            {
+                message = "Общий размер ресурсов превышает 40 МБ.";
+                return;
+            }
+
+            await using var input = file.OpenReadStream(MaxMusicSize);
+            using var output = new MemoryStream();
+
+            await input.CopyToAsync(output);
+
+            var bytes = output.ToArray();
+
+            if (bytes.LongLength > MaxMusicSize
+                || usedSize + bytes.LongLength > MaxResourceSize)
+            {
+                message = "Аудиофайл превышает допустимый размер.";
+                return;
+            }
+
+            var name = Path.GetFileNameWithoutExtension(file.Name).Trim();
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = "Музыка";
+            }
+
+            if (name.Length > 80)
+            {
+                name = name[..80];
+            }
+
+            var path = $"assets/music/{Guid.NewGuid():N}{extension}";
+
+            Project.Assets.Add(path, bytes);
+            Project.AssetNames[path] = name;
+        }
+        catch (IOException)
+        {
+            message = "Не удалось прочитать аудиофайл.";
+        }
+        catch (JSException)
+        {
+            message = "Браузер не смог открыть аудиофайл.";
+        }
+        finally
+        {
+            isBusy = false;
+            fileInputKey++;
+        }
     }
 }

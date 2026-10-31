@@ -1,0 +1,135 @@
+﻿@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div @ref="container"
+     class="novel-audio"
+     @onclick:stopPropagation="true">
+    <audio loop preload="auto"></audio>
+
+    <button type="button" class="editor-button music-start-button">
+        Включить музыку
+    </button>
+
+    <p class="music-status" role="status"></p>
+</div>
+
+@if (interopError is not null)
+{
+    <p class="audio-interop-error" role="status">
+        @interopError
+    </p>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public NovelProject Project { get; set; } = default!;
+
+    [Parameter]
+    public string? TrackPath { get; set; }
+
+    private ElementReference container;
+
+    private string? appliedPath;
+    private byte[]? appliedBytes;
+
+    private bool hasApplied;
+    private bool disposed;
+    private int requestVersion;
+
+    private string? interopError;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (disposed)
+        {
+            return;
+        }
+
+        var path = string.IsNullOrEmpty(TrackPath)
+            ? null
+            : TrackPath;
+
+        Project.Assets.TryGetValue(
+            path ?? string.Empty, out var bytes);
+
+        if (!hasApplied && path is null)
+        {
+            return;
+        }
+
+        if (hasApplied
+            && appliedPath == path
+            && ReferenceEquals(appliedBytes, bytes))
+        {
+            return;
+        }
+
+        hasApplied = true;
+        appliedPath = path;
+        appliedBytes = bytes;
+
+        var request = ++requestVersion;
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "novelAudio.setTrack",
+                container,
+                request,
+                path,
+                bytes,
+                GetContentType(path));
+
+            if (!disposed
+                && request == requestVersion
+                && interopError is not null)
+            {
+                interopError = null;
+                StateHasChanged();
+            }
+        }
+        catch (JSException)
+        {
+            if (!disposed && request == requestVersion)
+            {
+                interopError =
+                    "Не удалось подключить музыкальный плеер.";
+
+                StateHasChanged();
+            }
+        }
+    }
+
+    private static string GetContentType(string? path)
+    {
+        return Path.GetExtension(path ?? string.Empty)
+            .ToLowerInvariant() switch
+        {
+            ".mp3" => "audio/mpeg",
+            ".m4a" => "audio/mp4",
+            ".wav" => "audio/wav",
+            _ => "application/octet-stream"
+        };
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        disposed = true;
+        requestVersion++;
+
+        if (!hasApplied)
+        {
+            return;
+        }
+
+        try
+        {
+            await JS.InvokeVoidAsync(
+                "novelAudio.dispose", container);
+        }
+        catch (JSException)
+        {
+            // При закрытии страницы браузер уже может завершать работу.
+        }
+    }
+}
