@@ -1,0 +1,413 @@
+﻿@inject IJSRuntime JS
+
+<section class="novel-editor resource-screen">
+    <header class="editor-header">
+        <button class="editor-button"
+                disabled="@isBusy"
+                @onclick="GoBack">
+            Назад
+        </button>
+
+        <h1 class="editor-title">@Heading</h1>
+    </header>
+
+    <div class="resources-body">
+        @if (renamingPath is not null)
+        {
+            <form class="project-form resource-rename-form"
+                  @onsubmit="ApplyName"
+                  @onsubmit:preventDefault>
+
+                <label for="resource-name">Название</label>
+
+                <input id="resource-name"
+                       class="project-input"
+                       @bind="draftName"
+                       @bind:event="oninput"
+                       maxlength="80" />
+
+                <button type="submit" class="project-submit">
+                    Применить
+                </button>
+
+                <button type="button" class="menu-back"
+                        @onclick="CancelRename">
+                    Отмена
+                </button>
+            </form>
+        }
+        else if (gallery is null)
+        {
+            <div class="resource-settings-row">
+                <span>Фоны</span>
+                <button class="editor-button" @onclick="OpenBackgrounds">
+                    Добавить
+                </button>
+            </div>
+
+            <div class="resource-settings-row">
+                <span>Персонажи</span>
+                <button class="editor-button" @onclick="OpenCharacters">
+                    Добавить
+                </button>
+            </div>
+
+            @foreach (var name in disabledSections)
+            {
+                <div class="resource-settings-row">
+                    <span>@name</span>
+                    <button class="editor-button" disabled>
+                        Добавить
+                    </button>
+                </div>
+            }
+        }
+        else
+        {
+            @if (!ResourcePaths.Any())
+            {
+                <p class="resource-empty">
+                    Здесь пока нет изображений.
+                    Нажми «Добавить» внизу экрана.
+                </p>
+            }
+
+            <div class="resource-grid">
+                @foreach (var path in ResourcePaths)
+                {
+                    <article class="asset-card" @key="path">
+                        @if (thumbnails.TryGetValue(path, out var thumbnail))
+                        {
+                            <img class="asset-image"
+                                 src="@thumbnail"
+                                 alt="@GetName(path)"
+                                 loading="lazy" />
+                        }
+                        else
+                        {
+                            <div class="asset-image asset-placeholder">
+                                Предпросмотр недоступен
+                            </div>
+                        }
+
+                        <div class="asset-caption">
+                            <span class="asset-name"
+                                  title="@GetName(path)">
+                                @GetName(path)
+                            </span>
+
+                            <button class="scene-edit-button"
+                                    disabled="@isBusy"
+                                    aria-label="@($"Переименовать: {GetName(path)}")"
+                                    @onclick="() => BeginRename(path)">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <path d="M16 3 L21 8 L9 20 L4 20 L4 15 Z M14 5 L19 10" />
+                                </svg>
+                            </button>
+                        </div>
+                    </article>
+                }
+            </div>
+        }
+    </div>
+
+    <footer class="editor-footer">
+        @if (message is not null)
+        {
+            <p class="editor-file-message" role="alert">
+                @message
+            </p>
+        }
+
+        @if (gallery is not null && renamingPath is null)
+        {
+            <p class="resource-hint">
+                PNG, JPEG или WebP · до 10 МБ на изображение
+            </p>
+
+            <label class="resource-add file-open-card">
+                @(isBusy ? "Загружаем…" : "Добавить")
+
+                <InputFile @key="fileInputKey"
+                           OnChange="AddImage"
+                           accept=".png,.jpg,.jpeg,.webp"
+                           disabled="@isBusy"
+                           aria-label="Добавить изображение" />
+            </label>
+        }
+    </footer>
+</section>
+
+@code {
+    [Parameter, EditorRequired]
+    public NovelProject Project { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private const long MaxImageSize = 10 * 1024 * 1024;
+    private const long MaxResourceSize = 40 * 1024 * 1024;
+
+    private readonly string[] disabledSections =
+    {
+        "Оформление диалогов",
+        "Музыка",
+        "Звуки"
+    };
+
+    private readonly Dictionary<string, string> thumbnails = new();
+
+    private string? gallery;
+    private string? renamingPath;
+    private string draftName = string.Empty;
+
+    private bool isBusy;
+    private string? message;
+    private int fileInputKey;
+
+    private string Heading =>
+        renamingPath is not null
+            ? "Название ресурса"
+            : gallery switch
+            {
+                "backgrounds" => "Фоны",
+                "characters" => "Персонажи",
+                _ => "Настройки проекта"
+            };
+
+    private IEnumerable<string> ResourcePaths =>
+        Project.Assets.Keys
+            .Where(path => gallery is not null
+                && path.StartsWith(
+                    $"assets/{gallery}/",
+                    StringComparison.Ordinal))
+            .OrderBy(GetName, StringComparer.OrdinalIgnoreCase);
+
+    private string GetName(string path)
+    {
+        return Project.AssetNames.TryGetValue(path, out var name)
+            ? name
+            : Path.GetFileNameWithoutExtension(path);
+    }
+
+    private Task OpenBackgrounds()
+    {
+        return OpenGallery("backgrounds");
+    }
+
+    private Task OpenCharacters()
+    {
+        return OpenGallery("characters");
+    }
+
+    private async Task OpenGallery(string folder)
+    {
+        gallery = folder;
+        message = null;
+        isBusy = true;
+
+        try
+        {
+            foreach (var path in ResourcePaths.ToArray())
+            {
+                if (thumbnails.ContainsKey(path))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    thumbnails[path] = await JS.InvokeAsync<string>(
+                        "novelImages.thumbnail",
+                        Project.Assets[path]);
+                }
+                catch (JSException)
+                {
+                    message =
+                        "Некоторые изображения не удалось показать.";
+                }
+            }
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private async Task AddImage(InputFileChangeEventArgs args)
+    {
+        if (isBusy || gallery is null)
+        {
+            return;
+        }
+
+        isBusy = true;
+        message = null;
+
+        try
+        {
+            var file = args.File;
+
+            if (file.Size > MaxImageSize)
+            {
+                message = "Изображение должно быть не больше 10 МБ.";
+                return;
+            }
+
+            if (Project.Assets.Count >= 2000)
+            {
+                message = "В проекте слишком много ресурсов.";
+                return;
+            }
+
+            var usedSize = Project.Assets.Values.Sum(
+                bytes => bytes.LongLength);
+
+            if (usedSize + file.Size > MaxResourceSize)
+            {
+                message = "Общий размер ресурсов превышает 40 МБ.";
+                return;
+            }
+
+            await using var input = file.OpenReadStream(MaxImageSize);
+            using var output = new MemoryStream();
+
+            await input.CopyToAsync(output);
+
+            var bytes = output.ToArray();
+
+            if (bytes.LongLength > MaxImageSize
+                || usedSize + bytes.LongLength > MaxResourceSize)
+            {
+                message = "Изображение превышает допустимый размер.";
+                return;
+            }
+
+            var extension = DetectImageExtension(bytes);
+
+            if (extension is null)
+            {
+                message = "Выбери изображение PNG, JPEG или WebP.";
+                return;
+            }
+
+            var thumbnail = await JS.InvokeAsync<string>(
+                "novelImages.thumbnail", bytes);
+
+            var name = Path.GetFileNameWithoutExtension(file.Name).Trim();
+
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                name = gallery == "backgrounds" ? "Фон" : "Персонаж";
+            }
+
+            if (name.Length > 80)
+            {
+                name = name[..80];
+            }
+
+            var path =
+                $"assets/{gallery}/{Guid.NewGuid():N}{extension}";
+
+            Project.Assets.Add(path, bytes);
+            Project.AssetNames[path] = name;
+            thumbnails[path] = thumbnail;
+        }
+        catch (IOException)
+        {
+            message = "Не удалось прочитать изображение.";
+        }
+        catch (JSException)
+        {
+            message =
+                "Не удалось открыть изображение. Возможно, файл повреждён.";
+        }
+        finally
+        {
+            isBusy = false;
+            fileInputKey++;
+        }
+    }
+
+    private void BeginRename(string path)
+    {
+        renamingPath = path;
+        draftName = GetName(path);
+        message = null;
+    }
+
+    private void ApplyName()
+    {
+        if (renamingPath is null)
+        {
+            return;
+        }
+
+        var name = draftName.Trim();
+
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 80)
+        {
+            message = "Введи название длиной от 1 до 80 символов.";
+            return;
+        }
+
+        Project.AssetNames[renamingPath] = name;
+        renamingPath = null;
+        message = null;
+    }
+
+    private void CancelRename()
+    {
+        renamingPath = null;
+        message = null;
+    }
+
+    private async Task GoBack()
+    {
+        if (isBusy)
+        {
+            return;
+        }
+
+        message = null;
+
+        if (renamingPath is not null)
+        {
+            renamingPath = null;
+        }
+        else if (gallery is not null)
+        {
+            gallery = null;
+        }
+        else
+        {
+            await OnBack.InvokeAsync();
+        }
+    }
+
+    private static string? DetectImageExtension(byte[] bytes)
+    {
+        if (bytes.Take(8).SequenceEqual(
+            new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 }))
+        {
+            return ".png";
+        }
+
+        if (bytes.Length >= 3
+            && bytes[0] == 255
+            && bytes[1] == 216
+            && bytes[2] == 255)
+        {
+            return ".jpg";
+        }
+
+        if (bytes.Length >= 12
+            && System.Text.Encoding.ASCII.GetString(bytes, 0, 4) == "RIFF"
+            && System.Text.Encoding.ASCII.GetString(bytes, 8, 4) == "WEBP")
+        {
+            return ".webp";
+        }
+
+        return null;
+    }
+}

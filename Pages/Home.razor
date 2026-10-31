@@ -2,24 +2,79 @@
 
 <PageTitle>Your Novel Library</PageTitle>
 
-<h1>Your Novel Library</h1>
+<section class="home-menu">
+    @if (isProjectsOpen)
+    {
+        <ProjectMenu OnBack="ReturnToMenu" />
+    }
+    else if (!isLibraryOpen)
+    {
+        <h1>Your Novel Library</h1>
+        <p class="menu-subtitle">Читай истории. Создавай свои.</p>
 
-<p>Твоя библиотека визуальных новелл.</p>
+        <div class="menu-actions">
+            <button class="menu-card" @onclick="OpenLibrary">
+                <strong>Играть</strong>
+                <span>Выбери историю и начни приключение</span>
+            </button>
 
-<button class="btn btn-primary" @onclick="OpenNovel">
-    Открыть тестовую новеллу
-</button>
+            <button class="menu-card" @onclick="OpenProjects">
+                <strong>Создать новеллу</strong>
+                <span>Расскажи свою историю</span>
+            </button>
+        </div>
+    }
+    else
+    {
+        <h1>Моя библиотека</h1>
+        <p class="menu-subtitle">Пока здесь одна тестовая история.</p>
 
-@if (isNovelOpen)
-{
-    <p>Алина открыла книгу. На первой странице было написано её имя.</p>
-}
+        <div class="menu-actions">
+            <button class="menu-card" @onclick="OpenNovel">
+                <strong>История Алины</strong>
+                <span>Открыть тестовую новеллу</span>
+            </button>
+
+            @if (isNovelOpen)
+            {
+                <p class="novel-preview">
+                    Алина открыла книгу. На первой странице
+                    было написано её имя.
+                </p>
+            }
+
+            <button class="menu-back" @onclick="ReturnToMenu">
+                Вернуться в меню
+            </button>
+        </div>
+    }
+</section>
 
 @code {
+    private bool isLibraryOpen;
     private bool isNovelOpen;
+
+    private void OpenLibrary()
+    {
+        isLibraryOpen = true;
+    }
 
     private void OpenNovel()
     {
         isNovelOpen = true;
+    }
+
+    private bool isProjectsOpen;
+
+    private void OpenProjects()
+    {
+        isProjectsOpen = true;
+    }
+
+    private void ReturnToMenu()
+    {
+        isProjectsOpen = false;
+        isLibraryOpen = false;
+        isNovelOpen = false;
     }
 }

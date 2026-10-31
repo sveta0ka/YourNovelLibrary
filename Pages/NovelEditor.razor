@@ -1,0 +1,266 @@
+﻿@inject IJSRuntime JS
+
+@if (showSettings)
+{
+    <ProjectSettings Project="@Project"
+                     OnBack="CloseSettings" />
+}
+else if (editingScene is null)
+{
+    <section class="novel-editor">
+        <header class="editor-header">
+            <button class="editor-button" @onclick="ExitEditor">
+                Назад
+            </button>
+
+            <h1 class="editor-title" title="@Project.Title">
+                @Project.Title
+            </h1>
+
+            <button class="editor-button settings-button"
+                    disabled="@isSaving"
+                    title="Настройки проекта"
+                    aria-label="Настройки проекта"
+                    @onclick="OpenSettings">
+                <span aria-hidden="true">⚙</span>
+            </button>
+
+            <button class="editor-button"
+                    disabled="@isSaving"
+                    @onclick="SaveProject">
+                @(isSaving ? "Сохраняем…" : "Сохранить")
+            </button>
+        </header>
+
+        <div class="scene-preview" aria-label="Предпросмотр сцены">
+            <span class="preview-label">Предпросмотр</span>
+            <h2>@selectedScene.Name</h2>
+
+            <p>
+                @(string.IsNullOrWhiteSpace(selectedScene.Text)
+                    ? "Здесь появится текст выбранной сцены."
+                    : selectedScene.Text)
+            </p>
+        </div>
+
+        <h2 class="scene-list-heading">Список сцен</h2>
+
+        <div class="scene-list">
+            @foreach (var scene in scenes)
+            {
+                <div @key="scene"
+                     class="scene-row @(selectedScene == scene ? "is-selected" : "")">
+
+                    <button class="scene-select"
+                            aria-pressed="@(selectedScene == scene)"
+                            @onclick="() => SelectScene(scene)">
+                        @scene.Name
+                    </button>
+
+                    <button class="scene-edit-button"
+                            title="Изменить сцену"
+                            aria-label="@($"Редактировать сцену: {scene.Name}")"
+                            @onclick="() => EditScene(scene)">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M16 3 L21 8 L9 20 L4 20 L4 15 Z M14 5 L19 10" />
+                        </svg>
+                    </button>
+                </div>
+            }
+        </div>
+
+        <footer class="editor-footer">
+            @if (fileMessage is not null)
+            {
+                <p class="editor-file-message" role="status">
+                    @fileMessage
+                </p>
+            }
+            <button class="scene-add-button"
+                    aria-label="Добавить сцену"
+                    @onclick="AddScene">
+                +
+            </button>
+        </footer>
+    </section>
+}
+else
+{
+    <section class="novel-editor scene-edit-mode">
+        <header class="editor-header">
+            <button class="editor-button" @onclick="CancelEdit">
+                Назад
+            </button>
+
+            <h1 class="editor-title">Изменить сцену</h1>
+        </header>
+
+        <div class="scene-edit-body">
+            <form class="project-form"
+                  @onsubmit="ApplyChanges"
+                  @onsubmit:preventDefault>
+
+                <label for="scene-name">Название сцены</label>
+                <input id="scene-name"
+                       class="project-input"
+                       @bind="draftName"
+                       maxlength="80" />
+
+                <label for="scene-text">Текст сцены</label>
+                <textarea id="scene-text"
+                          class="project-input"
+                          @bind="draftText"
+                          rows="8"></textarea>
+
+                @if (errorMessage is not null)
+                {
+                    <p class="scene-form-error" role="alert">
+                        @errorMessage
+                    </p>
+                }
+
+                <button type="submit" class="project-submit">
+                    Применить
+                </button>
+
+                <button type="button" class="menu-back"
+                        @onclick="CancelEdit">
+                    Отмена
+                </button>
+            </form>
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired]
+    public NovelProject Project { get; set; } = default!;
+
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private List<NovelScene> scenes => Project.Scenes;
+
+    private NovelScene selectedScene = default!;
+    private NovelScene? editingScene;
+
+    private bool isSaving;
+    private string? fileMessage;
+
+    private string draftName = string.Empty;
+    private string draftText = string.Empty;
+    private string? errorMessage;
+
+    protected override void OnInitialized()
+    {
+        selectedScene = scenes[0];
+    }
+
+    private void SelectScene(NovelScene scene)
+    {
+        selectedScene = scene;
+    }
+
+    private void AddScene()
+    {
+        var scene = new NovelScene
+        {
+            Name = $"Сцена {scenes.Count + 1}"
+        };
+
+        scenes.Add(scene);
+        selectedScene = scene;
+    }
+
+    private void EditScene(NovelScene scene)
+    {
+        editingScene = scene;
+        draftName = scene.Name;
+        draftText = scene.Text;
+        errorMessage = null;
+    }
+
+    private void ApplyChanges()
+    {
+        if (editingScene is null)
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(draftName))
+        {
+            errorMessage = "Введи название сцены.";
+            return;
+        }
+
+        editingScene.Name = draftName.Trim();
+        editingScene.Text = draftText;
+
+        selectedScene = editingScene;
+        editingScene = null;
+    }
+
+    private void CancelEdit()
+    {
+        editingScene = null;
+        errorMessage = null;
+    }
+
+    private Task ExitEditor()
+    {
+        return OnBack.InvokeAsync();
+    }
+
+    private async Task SaveProject()
+    {
+        if (isSaving)
+        {
+            return;
+        }
+
+        isSaving = true;
+        fileMessage = null;
+
+        try
+        {
+            using var stream =
+                await ProjectArchive.CreateAsync(Project);
+
+            using var reference = new DotNetStreamReference(
+                stream, leaveOpen: true);
+
+            await JS.InvokeVoidAsync(
+                "novelFiles.download",
+                Project.Title,
+                reference);
+
+            fileMessage = "Файл передан браузеру для сохранения.";
+        }
+        catch (InvalidDataException exception)
+        {
+            fileMessage = exception.Message;
+        }
+        catch (JSException)
+        {
+            fileMessage =
+                "Не удалось начать скачивание. Попробуй ещё раз.";
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+
+    private bool showSettings;
+
+    private void OpenSettings()
+    {
+        showSettings = true;
+    }
+
+    private void CloseSettings()
+    {
+        showSettings = false;
+        fileMessage = null;
+    }
+}

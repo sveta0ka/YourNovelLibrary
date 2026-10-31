@@ -1,0 +1,192 @@
+﻿@using System.ComponentModel.DataAnnotations
+
+@if (screen == ProjectScreen.Menu)
+{
+    <h1>Проекты новелл</h1>
+    <p class="menu-subtitle">Начни новую историю или продолжи свою.</p>
+
+    <div class="menu-actions">
+        <button class="menu-card" @onclick="ShowNewProjectForm" disabled="@isOpeningProject">
+            <strong>Создать новый проект</strong>
+            <span>Начать историю с чистого листа</span>
+        </button>
+
+        <label class="menu-card file-open-card">
+            <strong>Открыть проект</strong>
+
+            <span>
+                @(isOpeningProject
+                    ? "Открываем проект…"
+                    : "Выбрать файл .ynl с устройства")
+            </span>
+
+            <InputFile @key="fileInputKey"
+                       OnChange="OpenProject"
+                       disabled="@isOpeningProject"
+                       aria-label="Открыть файл проекта новеллы" />
+        </label>
+
+        @if (openError is not null)
+        {
+            <p class="project-file-message" role="alert">
+                @openError
+            </p>
+        }
+
+        <button class="menu-back" @onclick="BackToMainMenu" disabled="@isOpeningProject">
+            Вернуться в главное меню
+        </button>
+    </div>
+}
+else if (screen == ProjectScreen.NewProject)
+{
+    <h1>Новый проект</h1>
+    <p class="menu-subtitle">Как будет называться твоя история?</p>
+
+    <EditForm Model="@form" OnValidSubmit="CreateProject"
+              class="project-form">
+        <DataAnnotationsValidator />
+
+        <label for="project-title">Название новеллы</label>
+
+        <InputText id="project-title"
+                   class="project-input"
+                   @bind-Value="form.Title"
+                   maxlength="80"
+                   placeholder="Например, Письма из другого мира" />
+
+        <ValidationMessage For="@(() => form.Title)" />
+
+        <button type="submit" class="project-submit">
+            Создать проект
+        </button>
+
+        <button type="button" class="menu-back"
+                @onclick="ShowProjectMenu">
+            Назад к проектам
+        </button>
+    </EditForm>
+}
+else if (screen == ProjectScreen.Editor && project is not null)
+{
+    <NovelEditor Project="@project"
+                 OnBack="ShowProjectMenu" />
+}
+
+@code {
+    [Parameter]
+    public EventCallback OnBack { get; set; }
+
+    private ProjectScreen screen = ProjectScreen.Menu;
+    private NewProjectForm form = new();
+    
+    private NovelProject? project;
+
+    private bool isOpeningProject;
+    private string? openError;
+    private int fileInputKey;
+
+    private void ShowNewProjectForm()
+    {
+        form = new NewProjectForm();
+        screen = ProjectScreen.NewProject;
+    }
+
+    private void ShowProjectMenu()
+    {
+        screen = ProjectScreen.Menu;
+    }
+
+    private void CreateProject()
+    {
+        project = new NovelProject
+        {
+            Title = form.Title.Trim(),
+            Scenes = new List<NovelScene>
+        {
+            new() { Name = "Сцена 1" }
+        }
+        };
+
+        screen = ProjectScreen.Editor;
+    }
+
+    private Task BackToMainMenu()
+    {
+        return OnBack.InvokeAsync();
+    }
+
+    private enum ProjectScreen
+    {
+        Menu,
+        NewProject,
+        Editor
+    }
+
+    private sealed class NewProjectForm
+    {
+        [Required(ErrorMessage = "Введи название новеллы.")]
+        [StringLength(80, ErrorMessage = "Название должно быть не длиннее 80 символов.")]
+        public string Title { get; set; } = string.Empty;
+    }
+
+    private async Task OpenProject(InputFileChangeEventArgs args)
+    {
+        if (isOpeningProject)
+        {
+            return;
+        }
+
+        isOpeningProject = true;
+        openError = null;
+
+        try
+        {
+            var file = args.File;
+
+            if (file.Size > ProjectArchive.MaxFileSize)
+            {
+                openError = "Файл превышает лимит в 50 МБ.";
+                return;
+            }
+
+            await using var input =
+                file.OpenReadStream(ProjectArchive.MaxFileSize);
+
+            var loadedProject =
+                await ProjectArchive.ReadAsync(input);
+
+            project = loadedProject;
+            screen = ProjectScreen.Editor;
+        }
+        catch (InvalidDataException)
+        {
+            openError =
+                "Не удалось открыть проект. Файл повреждён, "
+                + "имеет другой формат или превышает допустимые ограничения.";
+        }
+        catch (JsonException)
+        {
+            openError =
+                "Описание проекта повреждено или имеет неподдерживаемую структуру.";
+        }
+        catch (NotSupportedException)
+        {
+            openError = "Этот способ упаковки архива пока не поддерживается.";
+        }
+        catch (IOException)
+        {
+            openError = "Не удалось прочитать файл.";
+        }
+        catch (JSException)
+        {
+            openError =
+                "Браузер не смог открыть файл. Попробуй выбрать его снова.";
+        }
+        finally
+        {
+            isOpeningProject = false;
+            fileInputKey++;
+        }
+    }
+}
