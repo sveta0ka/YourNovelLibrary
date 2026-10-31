@@ -1,0 +1,25 @@
+﻿@page "/"
+
+<PageTitle>Your Novel Library</PageTitle>
+
+<h1>Your Novel Library</h1>
+
+<p>Твоя библиотека визуальных новелл.</p>
+
+<button class="btn btn-primary" @onclick="OpenNovel">
+    Открыть тестовую новеллу
+</button>
+
+@if (isNovelOpen)
+{
+    <p>Алина открыла книгу. На первой странице было написано её имя.</p>
+}
+
+@code {
+    private bool isNovelOpen;
+
+    private void OpenNovel()
+    {
+        isNovelOpen = true;
+    }
+}
