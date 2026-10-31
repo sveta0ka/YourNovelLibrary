@@ -1,0 +1,52 @@
+name: Publish Your Novel Library
+
+on:
+  push:
+    branches: ["master"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Download source code
+        uses: actions/checkout@v6
+
+      - name: Install .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Prepare application paths
+        run: |
+          sed -i 's|<base href="/" />|<base href="/YourNovelLibrary/" />|' wwwroot/index.html
+          sed -i 's|const base = "/";|const base = "/YourNovelLibrary/";|' wwwroot/service-worker.published.js
+
+      - name: Build application
+        run: dotnet publish YourNovelLibrary.csproj --configuration Release --output published
+
+      - name: Upload website files
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: published/wwwroot
+
+      - name: Publish website
+        id: deployment
+        uses: actions/deploy-pages@v4
